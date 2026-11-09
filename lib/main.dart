@@ -11,6 +11,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'To Do List',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
       home: const TodoListPage(),
     );
@@ -35,11 +36,25 @@ class _TodoListPageState extends State<TodoListPage> {
   ];
   final TextEditingController _controller = TextEditingController();
 
-  // Agregar una nueva tarea
+  // Agregar una nueva tarea (Evitando duplicados)
   void _addTask() {
-    if (_controller.text.trim().isNotEmpty) {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) {
+      // Verificamos si la tarea ya existe
+      if (_tasks.contains(text)) {
+        // Mostramos una alerta si está duplicada
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Esta tarea ya existe en la lista'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
       setState(() {
-        _tasks.add(_controller.text.trim());
+        _tasks.add(text);
         _controller.clear();
       });
     }
@@ -52,7 +67,7 @@ class _TodoListPageState extends State<TodoListPage> {
     });
   }
 
-  // Editar una tarea (muestra un dialogo)
+  // Editar una tarea
   void _editTask(int index) {
     final TextEditingController editController = TextEditingController(
       text: _tasks[index],
@@ -69,16 +84,36 @@ class _TodoListPageState extends State<TodoListPage> {
           ),
           FilledButton(
             onPressed: () {
-              setState(() {
-                _tasks[index] = editController.text.trim();
-              });
-              Navigator.pop(context);
+              final newText = editController.text.trim();
+              if (newText.isNotEmpty && !_tasks.contains(newText)) {
+                setState(() {
+                  _tasks[index] = newText;
+                });
+                Navigator.pop(context);
+              } else if (_tasks.contains(newText) && newText != _tasks[index]) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Esa tarea ya existe')),
+                );
+              } else {
+                Navigator.pop(context); // Si está vacío, solo cerramos
+              }
             },
             child: const Text('Guardar'),
           ),
         ],
       ),
     );
+  }
+
+  // Reordenar las tareas (Arrastrar y soltar)
+  void _onReorder(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) {
+        newIndex -= 1;
+      }
+      final String task = _tasks.removeAt(oldIndex);
+      _tasks.insert(newIndex, task);
+    });
   }
 
   @override
@@ -113,22 +148,24 @@ class _TodoListPageState extends State<TodoListPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.add, color: Colors.blue),
-                  onPressed: _addTask,
+                  onPressed: _addTask, // Botón de agregar corregido
                 ),
               ],
             ),
           ),
           const Divider(height: 1),
-          // Lista de tareas con Dismissible
+
+          // Lista Reordenable con Dismissible
           Expanded(
-            child: ListView.builder(
+            child: ReorderableListView.builder(
               itemCount: _tasks.length,
+              onReorder: _onReorder, // Función para mover arriba/abajo
+              buildDefaultDragHandles:
+                  false, // Desactivamos el arrastre por defecto
               itemBuilder: (context, index) {
                 final task = _tasks[index];
                 return Dismissible(
-                  key: Key(
-                    task + index.toString(),
-                  ), // Clave unica para cada elemento
+                  key: ValueKey(task), // Usamos el texto como clave única
                   background: Container(
                     color: Colors.blue,
                     alignment: Alignment.centerLeft,
@@ -141,20 +178,24 @@ class _TodoListPageState extends State<TodoListPage> {
                     padding: const EdgeInsets.only(right: 20),
                     child: const Icon(Icons.delete, color: Colors.white),
                   ),
-                  onDismissed: (direction) {
-                    // Si se desliza a la derecha (startToEnd), editar
+                  // LA MAGIA PARA QUE NO SE ROMPA LA PANTALLA:
+                  confirmDismiss: (direction) async {
                     if (direction == DismissDirection.startToEnd) {
-                      _editTask(index);
-                      // Forzar la reconstruccion para que el elemento vuelva a su lugar
-                      setState(() {});
-                    } else {
-                      // Si se desliza a la izquierda (endToStart), eliminar
-                      _deleteTask(index);
+                      _editTask(index); // Abre el diálogo de edición
+                      return false; // Evita que la tarea se borre al editar
                     }
+                    return true; // Permite borrar al deslizar a la izquierda
+                  },
+                  onDismissed: (direction) {
+                    _deleteTask(index); // Borra la tarea de la lista
                   },
                   child: ListTile(
                     title: Text(task),
-                    trailing: const Icon(Icons.drag_handle),
+                    trailing: ReorderableDragStartListener(
+                      index: index,
+                      // Este es el ícono que se puede arrastrar
+                      child: const Icon(Icons.drag_handle, color: Colors.grey),
+                    ),
                   ),
                 );
               },
